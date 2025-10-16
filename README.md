@@ -1,6 +1,6 @@
 # DevOpsify
 
-
+![alt text](image.png)
 
 ## Getting started
 
