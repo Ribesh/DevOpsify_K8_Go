@@ -1,0 +1,110 @@
+workflow:
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /skip-ci/i'   # skip commits from pipeline pushes
+      when: never
+    - when: always
+
+stages:
+  - build
+  - test
+  - deploy
+  - update
+
+build-job:
+  stage: build
+  image: golang:1.22.5
+  script:
+    - echo "Building Golang Web App"
+    - go mod tidy
+    - go build -o go-web-app
+  artifacts:
+    paths:
+      - go-web-app
+  tags:
+    -  Ribesh-Test-Runner
+  # rules:
+  #   - if: '$CI_COMMIT_BRANCH == "main"'   # only run on main branch
+  #   - when: never                         # otherwise never run
+
+
+test-job:
+  stage: test
+  image: golang:1.22.5
+  script:
+    - go test ./...
+  # rules:
+  #   - if: '$CI_COMMIT_BRANCH == "main"'   # only run on main branch
+  #   - when: never 
+
+
+# code-quality:
+#   stage: lint
+#   image: golangci/golangci-lint:v1.56.2
+#   script:
+#     - golangci-lint run ./...
+#   tags:
+#     -  Ribesh-Test-Runner
+
+
+deploy-to-registry_optimized:
+  stage: deploy
+  image: docker:28.3.3
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+    - docker build -t $CI_REGISTRY/ribesh_test/devopsify:$CI_PIPELINE_ID .
+    - docker push $CI_REGISTRY/ribesh_test/devopsify:$CI_PIPELINE_ID
+  tags:
+    - Ribesh-Test-Runner
+  # rules:
+  #   - if: '$CI_COMMIT_BRANCH == "main"'   # only run on main branch
+  #   - when: never   
+
+deploy-to-docker-hub:
+  stage: deploy
+  image: docker:28.3.3
+  script:
+    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+    - docker build -t ribeshshr/go-web-app:$CI_PIPELINE_ID .
+    - docker push ribeshshr/go-web-app:$CI_PIPELINE_ID
+  tags:
+    - Ribesh-Test-Runner
+  # rules:
+  #   - if: '$CI_COMMIT_BRANCH == "main"'   # only run on main branch
+  #   - when: never   
+
+
+
+update-helm-chart:
+  image:
+    name: alpine/helm:3
+    entrypoint: [""]
+  stage: update
+  script:
+    - 'sed -i "s/tag: .*/tag: \"$CI_PIPELINE_ID\"/" helm/go-web-app-chart/values.yaml'
+  artifacts:
+    paths:
+      - helm/go-web-app-chart/values.yaml
+  tags:
+    - Ribesh-Test-Runner
+
+
+
+
+push-helm-update:
+  stage: update
+  image: bitnami/git:2.46.0
+  before_script:
+  - git config --global user.email "ribesh.shrestha@cas.com.np"
+  - git config --global user.name "Ribesh Shrestha"
+  - 'echo "Branch: $CI_COMMIT_REF_NAME"'
+  - git remote -v
+  - git remote set-url origin "https://${GIT_USER}:${GIT_PASS}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+  script:
+  - git add helm/go-web-app-chart/values.yaml
+  - git commit -m "Update tag in Helm chart to $CI_PIPELINE_ID [skip-ci]" || echo "No changes to commit"
+  - git push origin HEAD:$CI_COMMIT_REF_NAME
+  needs:
+    - update-helm-chart
+  tags:
+    - Ribesh-Test-Runner
+
